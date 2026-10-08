@@ -25,8 +25,8 @@ jobs:
         with:
           # Fetch entire history is required for changesets to correctly determine version bumps
           fetch-depth: 0
-          # Optionally persist credentials for commit/push by the action
-          # persist-credentials: false # Uncomment if you have issues with GITHUB_TOKEN permissions
+          # Disable credential persistence to prevent write-capable token exposure to build processes
+          persist-credentials: false
 
       # Setup pnpm and Node.js using versions consistent with your ci.yml
       - name: Setup pnpm
