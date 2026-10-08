@@ -9,6 +9,7 @@ import {
 	consentGitToken,
 	deployOnPrBaseBranches,
 	deployOnPushBranches,
+	docsCommitSha,
 	onlyIfChanged,
 	setupDocs,
 	vercelArgs,
@@ -154,7 +155,7 @@ export async function performVercelDeployment(
 	// Optional docs setup inline
 	if (setupDocs) {
 		try {
-			setupDocsWithScript(consentGitToken);
+			setupDocsWithScript(consentGitToken, docsCommitSha);
 		} catch (e) {
 			core.setFailed(
 				`docs setup failed: ${e instanceof Error ? e.message : String(e)}`

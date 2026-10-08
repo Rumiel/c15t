@@ -19,6 +19,9 @@ inputs:
     description: "Branch or ref of docs template"
     default: "main"
     required: false
+  docs_commit_sha:
+    description: "Pinned commit SHA to verify after cloning docs template (security: prevents execution of unverified code)"
+    required: false
   only_if_changed:
     description: "Skip deploy when no relevant files changed"
     default: "false"
@@ -174,6 +177,7 @@ runs:
         INPUT_CONSENT_GIT_TOKEN: ${{ inputs.consent_git_token }}
         INPUT_DOCS_TEMPLATE_REPO: ${{ inputs.docs_template_repo }}
         INPUT_DOCS_TEMPLATE_REF: ${{ inputs.docs_template_ref }}
+        INPUT_DOCS_COMMIT_SHA: ${{ inputs.docs_commit_sha }}
         INPUT_ONLY_IF_CHANGED: ${{ inputs.only_if_changed }}
         INPUT_CHANGE_GLOBS: ${{ inputs.change_globs }}
         INPUT_CHECK_TEMPLATE_CHANGES: ${{ inputs.check_template_changes }}

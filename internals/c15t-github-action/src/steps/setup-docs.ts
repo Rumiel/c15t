@@ -16,7 +16,10 @@ function isForkPullRequest(): boolean {
 	return headRepo.toLowerCase() !== thisRepo.toLowerCase();
 }
 
-export function setupDocsWithScript(consentGitToken?: string): void {
+export function setupDocsWithScript(
+	consentGitToken?: string,
+	commitSha?: string
+): void {
 	const isPrFromFork = isForkPullRequest();
 	if (isPrFromFork) {
 		core.info('PR from fork detected: skipping docs setup');
@@ -26,7 +29,14 @@ export function setupDocsWithScript(consentGitToken?: string): void {
 		...process.env,
 		CONSENT_GIT_TOKEN: consentGitToken || process.env.CONSENT_GIT_TOKEN || '',
 	};
+	// Pass commit SHA via environment variable if provided
+	if (commitSha) {
+		env.DOCS_COMMIT_SHA = commitSha;
+	}
 	core.info('Running docs setup script via pnpm tsx scripts/setup-docs.ts');
+	if (commitSha) {
+		core.info(`Using pinned commit SHA: ${commitSha}`);
+	}
 	const result = spawnSync(
 		'pnpm',
 		['tsx', 'scripts/setup-docs.ts', '--vercel'],

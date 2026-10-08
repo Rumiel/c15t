@@ -10,6 +10,13 @@ const error = console.error;
  * documentation site. It fetches a private Next.js documentation template from
  * GitHub and configures it for either development or production deployment.
  *
+ * **SECURITY MODEL:**
+ * - Clones from a pinned commit SHA (PINNED_COMMIT_SHA in configuration)
+ * - Verifies the cloned commit matches the expected SHA before execution
+ * - Prevents execution of unverified code from mutable branch references
+ * - Commit SHA can be overridden via --commit-sha flag or DOCS_COMMIT_SHA env var
+ * - Update PINNED_COMMIT_SHA when intentionally updating the template
+ *
  * **Default Mode (Development):**
  * - Loads token from `.env` file
  * - Sets up .docs for immediate `pnpm dev` usage
@@ -25,9 +32,15 @@ const error = console.error;
  * - Defaults to 'main' branch
  * - Use --branch=canary for canary releases
  * - Use --branch=develop for development branch
+ * - Branch is used for clone, but commit SHA is always verified
+ *
+ * **Commit SHA Override (--commit-sha flag or DOCS_COMMIT_SHA env):**
+ * - Override the pinned commit SHA for testing or updates
+ * - Use --commit-sha=abc123... to specify a different commit
+ * - Or set DOCS_COMMIT_SHA environment variable
  *
  * @author Generated for C15t workspace
- * @version 2.1.0
+ * @version 2.2.0
  * @since 2025
  *
  * @see {@link https://c15t.com/docs/contributing/documentation-setup | Setup Documentation}
@@ -41,20 +54,25 @@ const error = console.error;
  *
  * @throws {ProcessExitError} When CONSENT_GIT_TOKEN is missing or invalid
  * @throws {FetchScriptError} When any fetch step fails
+ * @throws {FetchScriptError} When commit SHA verification fails
  *
  * @example
  * ```bash
- * # Development setup (default branch: main)
+ * # Development setup (default branch: main, pinned SHA)
  * tsx scripts/setup-docs.ts
  * pnpm setup:docs
  *
- * # Development setup with canary branch
+ * # Development setup with canary branch (still verifies pinned SHA)
  * tsx scripts/setup-docs.ts --branch=canary
  * pnpm setup:docs -- --branch=canary
  *
+ * # Development setup with custom commit SHA
+ * tsx scripts/setup-docs.ts --commit-sha=abc123def456...
+ * DOCS_COMMIT_SHA=abc123def456... pnpm setup:docs
+ *
  * # Production build for Vercel
  * tsx scripts/setup-docs.ts --vercel
- * CONSENT_GIT_TOKEN=xxx tsx scripts/setup-docs.ts --vercel --branch=canary
+ * CONSENT_GIT_TOKEN=xxx tsx scripts/setup-docs.ts --vercel --commit-sha=abc123...
  * ```
  */
 
@@ -100,6 +118,11 @@ type BuildMode = 'development' | 'production';
 type GitBranch = string;
 
 /**
+ * Git commit SHA for documentation template
+ */
+type GitCommitSHA = string;
+
+/**
  * Configuration object for fetch process
  */
 interface FetchConfiguration {
@@ -111,6 +134,8 @@ interface FetchConfiguration {
 	readonly DOCS_REPO_URL: string;
 	/** Default branch to fetch from */
 	readonly DEFAULT_BRANCH: GitBranch;
+	/** Pinned commit SHA for reproducible and secure builds */
+	readonly PINNED_COMMIT_SHA: GitCommitSHA;
 }
 
 /**
@@ -123,6 +148,8 @@ interface FetchOptions {
 	readonly mode: BuildMode;
 	/** Git branch to fetch from */
 	readonly branch: GitBranch;
+	/** Git commit SHA to verify after clone (overrides default pinned SHA) */
+	readonly commitSHA: GitCommitSHA;
 }
 
 /**
@@ -156,32 +183,68 @@ class FetchScriptError extends Error {
 
 /**
  * Immutable configuration constants for the fetch process
+ *
+ * SECURITY NOTICE - PINNED_COMMIT_SHA:
+ * ====================================
+ * The PINNED_COMMIT_SHA is a critical security control that prevents execution
+ * of unverified code from the external documentation repository. This value MUST
+ * be set before the script can run.
+ *
+ * To set the initial commit SHA:
+ * 1. Manually clone and inspect the repository:
+ *    git clone https://github.com/consentdotio/c15t-docs.git /tmp/c15t-docs-verify
+ *    cd /tmp/c15t-docs-verify
+ *
+ * 2. Verify the commit you want to pin (review code, check author, etc.):
+ *    git log --oneline -10
+ *    git show <commit-sha>
+ *
+ * 3. Copy the full 40-character commit SHA:
+ *    git rev-parse HEAD
+ *
+ * 4. Update PINNED_COMMIT_SHA below with the verified SHA
+ *
+ * To update the pinned commit SHA:
+ * - Follow the same verification process above
+ * - Update PINNED_COMMIT_SHA with the new verified SHA
+ * - Commit the change with a clear explanation of what was updated
+ *
+ * Alternative: Pass commit SHA at runtime (for testing or CI/CD):
+ * - Use --commit-sha=<sha> flag
+ * - Or set DOCS_COMMIT_SHA environment variable
+ * - Or configure docs_commit_sha in GitHub Actions workflow
  */
 const FETCH_CONFIG: FetchConfiguration = {
 	TEMP_DOCS_DIR: join(tmpdir(), 'c15t-docs'),
 	DOCS_APP_DIR: '.docs',
 	DOCS_REPO_URL: 'https://github.com/consentdotio/c15t-docs.git',
 	DEFAULT_BRANCH: 'main',
+	// SECURITY: Pinned commit SHA for reproducible and secure builds.
+	// This prevents execution of unverified code from mutable branches.
+	// REQUIRED: Replace this empty string with a valid 40-character commit SHA.
+	// See the SECURITY NOTICE above for instructions on how to set this value.
+	PINNED_COMMIT_SHA: '',
 } as const;
 
 /**
  * Parses command line arguments to determine fetch options
  *
  * This function analyzes the process arguments to determine whether this is
- * a development setup or production build, and which branch to fetch from.
- * The default behavior is development mode with the main branch.
+ * a development setup or production build, which branch to fetch from, and
+ * which commit SHA to verify. The default behavior is development mode with
+ * the main branch and the pinned commit SHA from configuration.
  *
- * @returns Parsed fetch options with mode, production flag, and branch
+ * @returns Parsed fetch options with mode, production flag, branch, and commit SHA
  *
  * @example
  * ```typescript
- * // Default development mode, main branch
+ * // Default development mode, main branch, pinned SHA
  * const options = parseFetchOptions();
- * // { isProduction: false, mode: 'development', branch: 'main' }
+ * // { isProduction: false, mode: 'development', branch: 'main', commitSHA: '...' }
  *
- * // Production mode with canary branch
- * const options = parseFetchOptions(); // --vercel --branch=canary
- * // { isProduction: true, mode: 'production', branch: 'canary' }
+ * // Production mode with custom commit SHA
+ * const options = parseFetchOptions(); // --vercel --commit-sha=abc123...
+ * // { isProduction: true, mode: 'production', branch: 'main', commitSHA: 'abc123...' }
  * ```
  */
 function parseFetchOptions(): FetchOptions {
@@ -204,6 +267,52 @@ function parseFetchOptions(): FetchOptions {
 		}
 	}
 
+	// Parse commit SHA: --commit-sha=abc123... or env var DOCS_COMMIT_SHA
+	let commitSHA = FETCH_CONFIG.PINNED_COMMIT_SHA;
+	const commitShaFlag = process.argv.find((arg) =>
+		arg.startsWith('--commit-sha')
+	);
+
+	if (commitShaFlag) {
+		if (commitShaFlag.includes('=')) {
+			// Format: --commit-sha=abc123...
+			commitSHA = commitShaFlag.split('=')[1];
+		} else {
+			// Format: --commit-sha abc123...
+			const shaIndex = process.argv.indexOf(commitShaFlag);
+			if (shaIndex !== -1 && shaIndex + 1 < process.argv.length) {
+				commitSHA = process.argv[shaIndex + 1];
+			}
+		}
+	} else if (process.env.DOCS_COMMIT_SHA) {
+		// Allow override via environment variable
+		commitSHA = process.env.DOCS_COMMIT_SHA;
+	}
+
+	// Validate commit SHA is provided and has correct format
+	if (!commitSHA || commitSHA.trim() === '') {
+		error('❌ SECURITY: No commit SHA provided for documentation template.');
+		error('   This is required to prevent execution of unverified code.');
+		error('   Please provide a commit SHA via one of:');
+		error('   1. Update PINNED_COMMIT_SHA in scripts/setup-docs.ts');
+		error('   2. Pass --commit-sha=<sha> flag');
+		error('   3. Set DOCS_COMMIT_SHA environment variable');
+		error('');
+		error('   To get the commit SHA:');
+		error('   1. Clone the repository: git clone https://github.com/consentdotio/c15t-docs.git');
+		error('   2. Verify the commit: git log -1');
+		error('   3. Copy the full 40-character SHA');
+		exit(1);
+	}
+
+	// Validate SHA format (40 hexadecimal characters)
+	if (!/^[0-9a-f]{40}$/i.test(commitSHA)) {
+		error(`❌ SECURITY: Invalid commit SHA format: ${commitSHA}`);
+		error('   Commit SHA must be exactly 40 hexadecimal characters.');
+		error('   Example: 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b');
+		exit(1);
+	}
+
 	return {
 		isProduction,
 		mode: (() => {
@@ -213,6 +322,7 @@ function parseFetchOptions(): FetchOptions {
 			return 'development';
 		})(),
 		branch: branch || FETCH_CONFIG.DEFAULT_BRANCH,
+		commitSHA: commitSHA,
 	};
 }
 
@@ -399,23 +509,26 @@ function executeCommand(
  * (depth=1) optimization significantly reduces download time and bandwidth usage
  * by fetching only the latest commit without the full git history.
  *
+ * SECURITY: After cloning, this function verifies that the checked-out commit
+ * matches the expected commit SHA. This prevents execution of unverified code
+ * from mutable branch references and ensures reproducible builds.
+ *
  * @param authenticationToken - Valid GitHub personal access token with repository read permissions
  * @param buildMode - Current build mode for error context
  * @param branch - Git branch to clone from the repository
+ * @param expectedCommitSHA - Expected commit SHA to verify after clone
  *
  * @throws {FetchScriptError} When git clone operation fails
  * @throws {FetchScriptError} When authentication fails due to invalid token
  * @throws {FetchScriptError} When network connectivity issues prevent cloning
  * @throws {FetchScriptError} When specified branch doesn't exist
+ * @throws {FetchScriptError} When cloned commit SHA doesn't match expected SHA
  *
  * @example
  * ```typescript
  * const token = validateGitHubToken('development', 'main');
- * cloneDocumentationRepository(token, 'development', 'main');
- * // Repository now available at /tmp/new-docs from main branch
- *
- * cloneDocumentationRepository(token, 'development', 'canary');
- * // Repository now available at /tmp/new-docs from canary branch
+ * cloneDocumentationRepository(token, 'development', 'main', 'abc123...');
+ * // Repository now available at /tmp/new-docs from main branch at commit abc123...
  * ```
  *
  * @see {@link https://git-scm.com/docs/git-clone | Git Clone Documentation}
@@ -426,7 +539,8 @@ function executeCommand(
 function cloneDocumentationRepository(
 	authenticationToken: GitHubToken,
 	buildMode: BuildMode,
-	branch: GitBranch
+	branch: GitBranch,
+	expectedCommitSHA: GitCommitSHA
 ): void {
 	const repoUrl = 'https://github.com/consentdotio/c15t-docs.git';
 	const basicAuth = Buffer.from(
@@ -449,13 +563,39 @@ function cloneDocumentationRepository(
 		{ redact: [authenticationToken, basicAuth] }
 	);
 
-	// Note: For reproducible builds across environments, consider pinning to specific commit:
-	// executeCommand(
-	//   `git -C ${FETCH_CONFIG.TEMP_DOCS_DIR} checkout <commit-sha>`,
-	//   'Pinning to specific commit for reproducible builds',
-	//   buildMode,
-	//   branch
-	// );
+	// SECURITY: Verify the cloned commit matches the expected SHA
+	log(`🔒 Verifying commit SHA matches expected: ${expectedCommitSHA}`);
+
+	let actualCommitSHA: string;
+	try {
+		actualCommitSHA = execSync(
+			`git -C ${FETCH_CONFIG.TEMP_DOCS_DIR} rev-parse HEAD`,
+			{ encoding: 'utf-8' }
+		).trim();
+	} catch {
+		throw new FetchScriptError(
+			'Failed to retrieve commit SHA from cloned repository',
+			'commit_verification',
+			buildMode,
+			branch,
+			`git -C ${FETCH_CONFIG.TEMP_DOCS_DIR} rev-parse HEAD`
+		);
+	}
+
+	if (actualCommitSHA !== expectedCommitSHA) {
+		error(`❌ Commit SHA mismatch!`);
+		error(`   Expected: ${expectedCommitSHA}`);
+		error(`   Actual:   ${actualCommitSHA}`);
+		throw new FetchScriptError(
+			`Commit SHA verification failed. Expected ${expectedCommitSHA} but got ${actualCommitSHA}. ` +
+				`This prevents execution of unverified code. Update PINNED_COMMIT_SHA or pass --commit-sha flag.`,
+			'commit_verification',
+			buildMode,
+			branch
+		);
+	}
+
+	log(`✅ Commit SHA verified: ${actualCommitSHA}`);
 }
 
 /**
@@ -634,30 +774,32 @@ function installDocsAppDependencies(
  * **Development Mode Pipeline:**
  * 1. **Authentication**: Load token from .env file
  * 2. **Template Acquisition**: Clone latest documentation template from specified branch
- * 3. **Workspace Integration**: Sync template to .docs and create content symlinks
- * 4. **Dependency Setup**: Install .docs dependencies
- * 5. **Content Processing**: Run fumadocs-mdx to process linked MDX content
+ * 3. **Commit Verification**: Verify cloned commit matches expected SHA (SECURITY)
+ * 4. **Workspace Integration**: Sync template to .docs and create content symlinks
+ * 5. **Dependency Setup**: Install .docs dependencies
+ * 6. **Content Processing**: Run fumadocs-mdx to process linked MDX content
  *
  * **Production Mode Pipeline:**
  * 1. **Authentication**: Validate environment token
  * 2. **Template Acquisition**: Clone latest documentation template from specified branch
- * 3. **Workspace Integration**: Sync template to .docs and create content symlinks
- * 4. Skips installations and content processing (handled by Vercel build)
- * 5. **Build handled by Vercel**
+ * 3. **Commit Verification**: Verify cloned commit matches expected SHA (SECURITY)
+ * 4. **Workspace Integration**: Sync template to .docs and create content symlinks
+ * 5. Skips installations and content processing (handled by Vercel build)
+ * 6. **Build handled by Vercel**
  *
- * @param fetchOptions - Parsed command line options determining build mode and branch
+ * @param fetchOptions - Parsed command line options determining build mode, branch, and commit SHA
  *
  * @throws {ProcessExitError} When any fetch phase fails, causing process termination
  * @throws {FetchScriptError} When specific fetch operations encounter errors
  *
  * @example
  * ```typescript
- * // Development mode with main branch
- * const options = { isProduction: false, mode: 'development', branch: 'main' };
+ * // Development mode with main branch and pinned SHA
+ * const options = { isProduction: false, mode: 'development', branch: 'main', commitSHA: 'abc123...' };
  * main(options); // Ready for pnpm dev
  *
- * // Production mode with canary branch
- * const options = { isProduction: true, mode: 'production', branch: 'canary' };
+ * // Production mode with custom commit SHA
+ * const options = { isProduction: true, mode: 'production', branch: 'main', commitSHA: 'def456...' };
  * main(options); // Ready for Vercel deployment
  * ```
  *
@@ -677,6 +819,7 @@ function main(fetchOptions: FetchOptions): void {
 	log(
 		`${modeEmoji} Starting ${modeText} for documentation site (${fetchOptions.branch} branch)...\n`
 	);
+	log(`🔒 Using commit SHA: ${fetchOptions.commitSHA}\n`);
 
 	try {
 		// Phase 1: Validate authentication credentials
@@ -686,10 +829,12 @@ function main(fetchOptions: FetchOptions): void {
 		);
 
 		// Phase 2: Acquire latest documentation template from specified branch
+		// and verify commit SHA (SECURITY)
 		cloneDocumentationRepository(
 			githubAuthenticationToken,
 			fetchOptions.mode,
-			fetchOptions.branch
+			fetchOptions.branch,
+			fetchOptions.commitSHA
 		);
 
 		// Phase 3: Integrate template into workspace
@@ -707,6 +852,7 @@ function main(fetchOptions: FetchOptions): void {
 		// Success messaging based on mode
 		log(`\n🎉 ${modeText} completed successfully!`);
 		log(`📋 Branch: ${fetchOptions.branch}`);
+		log(`🔒 Commit: ${fetchOptions.commitSHA}`);
 
 		if (fetchOptions.isProduction) {
 			log('📦 Documentation site prepared; Vercel will perform the build.');
