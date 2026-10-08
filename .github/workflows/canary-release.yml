@@ -29,22 +29,32 @@ jobs:
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
-      # Configure pnpm to use npm registry with auth token
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build all packages before publishing to isolate credentials from build scripts.
+      # This prevents repository-controlled build and prebuild scripts from accessing
+      # GITHUB_TOKEN and NPM_TOKEN, which are only needed for the publish step.
+      - name: Build packages
+        run: pnpm build
+
+      # Configure pnpm to use npm registry with auth token.
+      # This step is placed after the build to prevent credentials from being
+      # accessible to repository-controlled build scripts.
       - name: Setup pnpm config
         run: |
           pnpm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Create and publish snapshot release
         id: changesets
         uses: changesets/action@v1
         with:
           version: pnpm run version:canary
-          publish: pnpm run release:canary
+          # Only run the publish command, not the full release:canary script.
+          # The build step has already completed above without credentials in scope.
+          publish: changeset publish --tag canary
           commit: "chore: publish canary snapshot"
           title: "chore: publish canary snapshot"
         env:
