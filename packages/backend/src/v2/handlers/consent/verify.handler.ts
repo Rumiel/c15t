@@ -2,6 +2,7 @@ import { ORPCError } from '@orpc/server';
 import type { z } from 'zod';
 import { os } from '~/v2/contracts';
 import type { PolicyTypeSchema } from '~/v2/db/schema';
+import { validateSubjectAuthorization } from '~/v2/middleware/auth';
 import type { C15TContext } from '~/v2/types';
 
 /**
@@ -93,6 +94,12 @@ export const verifyConsent = os.consent.verify.handler(
 		});
 
 		try {
+			// Validate subject authorization before processing
+			validateSubjectAuthorization(
+				{ subjectId, externalSubjectId },
+				typedContext
+			);
+
 			// Find domain
 			const domainRecord = await typedContext.registry.findDomainByName(domain);
 

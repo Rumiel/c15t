@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/server';
 import { os } from '~/v2/contracts';
 import { generateUniqueId } from '~/v2/db/registry/utils';
+import { validateSubjectAuthorization } from '~/v2/middleware/auth';
 import type { C15TContext } from '~/v2/types';
 
 /**
@@ -52,6 +53,12 @@ export const postConsent = os.consent.post.handler(
 		});
 
 		try {
+			// Validate subject authorization before processing
+			validateSubjectAuthorization(
+				{ subjectId, externalSubjectId },
+				typedContext
+			);
+
 			const subject = await registry.findOrCreateSubject({
 				subjectId,
 				externalSubjectId,

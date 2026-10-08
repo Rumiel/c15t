@@ -1,5 +1,6 @@
 import { ORPCError } from '@orpc/server';
 import { os } from '~/contracts';
+import { validateSubjectAuthorization } from '~/middleware/auth';
 import type { Adapter } from '~/pkgs/db-adapters/types';
 import type { Consent } from '~/schema/consent';
 import type { ConsentRecord } from '~/schema/consent-record';
@@ -53,6 +54,12 @@ export const postConsent = os.consent.post.handler(
 		});
 
 		try {
+			// Validate subject authorization before processing
+			validateSubjectAuthorization(
+				{ subjectId, externalSubjectId },
+				typedContext
+			);
+
 			const subject = await typedContext.registry.findOrCreateSubject({
 				subjectId,
 				externalSubjectId,
