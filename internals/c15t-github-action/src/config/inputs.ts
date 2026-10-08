@@ -116,6 +116,9 @@ export const docsTemplateRepo =
 	'consentdotio/c15t-docs';
 export const docsTemplateRef =
 	core.getInput('docs_template_ref', { required: false }) || 'main';
+export const docsCommitSha = core.getInput('docs_commit_sha', {
+	required: false,
+});
 export const onlyIfChanged = core.getBooleanInput('only_if_changed', {
 	required: false,
 });
