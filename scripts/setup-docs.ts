@@ -328,6 +328,73 @@ function cleanupDirectory(
 }
 
 /**
+ * Sanitizes the process environment by removing CI secrets and sensitive tokens
+ *
+ * This function creates a clean environment for executing untrusted code from
+ * the fetched documentation repository. It removes all INPUT_* variables that
+ * contain GitHub Action inputs (including tokens and private keys), as well as
+ * the CONSENT_GIT_TOKEN used for repository authentication.
+ *
+ * This prevents supply-chain attacks where malicious code in the documentation
+ * repository or its dependencies could exfiltrate CI secrets during package
+ * installation or script execution.
+ *
+ * @returns A sanitized environment object safe for untrusted code execution
+ *
+ * @example
+ * ```typescript
+ * const cleanEnv = sanitizeEnvironment();
+ * execSync('pnpm install', { env: cleanEnv });
+ * // Untrusted code cannot access INPUT_GITHUB_TOKEN, INPUT_VERCEL_TOKEN, etc.
+ * ```
+ *
+ * @see {@link https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions | GitHub Actions Security Hardening}
+ */
+function sanitizeEnvironment(): NodeJS.ProcessEnv {
+	const sanitized: NodeJS.ProcessEnv = {};
+
+	// Copy all environment variables except sensitive ones
+	for (const [key, value] of Object.entries(process.env)) {
+		// Remove GitHub Actions input variables (INPUT_*)
+		// These contain all action inputs including tokens and private keys
+		if (key.startsWith('INPUT_')) {
+			continue;
+		}
+
+		// Remove authentication tokens used by this script
+		if (key === 'CONSENT_GIT_TOKEN') {
+			continue;
+		}
+
+		// Remove other common CI secret patterns
+		if (
+			key.includes('TOKEN') ||
+			key.includes('SECRET') ||
+			key.includes('KEY') ||
+			key.includes('PASSWORD') ||
+			key.includes('CREDENTIAL')
+		) {
+			// Allow known safe variables
+			if (
+				key === 'NODE_AUTH_TOKEN' || // May be needed for npm registry
+				key === 'PATH' ||
+				key === 'HOME' ||
+				key === 'USER' ||
+				key === 'SHELL'
+			) {
+				sanitized[key] = value;
+			}
+			continue;
+		}
+
+		// Copy safe environment variables
+		sanitized[key] = value;
+	}
+
+	return sanitized;
+}
+
+/**
  * Executes a shell command with comprehensive error handling and logging
  *
  * This function provides a robust wrapper around Node.js `execSync` with
@@ -339,6 +406,10 @@ function cleanupDirectory(
  * @param description - Human-readable description of the operation for logging
  * @param buildMode - Current build mode for error context
  * @param branch - Current branch for error context
+ * @param options - Optional configuration for redaction, output control, and environment sanitization
+ * @param options.redact - Array of sensitive strings to redact from logs
+ * @param options.silent - When true, suppresses command output in logs
+ * @param options.sanitizeEnv - When true, removes CI secrets from environment before execution
  *
  * @throws {FetchScriptError} When the command execution fails with non-zero exit code
  * @throws {FetchScriptError} When the command cannot be spawned or found
@@ -360,7 +431,7 @@ function executeCommand(
 	description: OperationDescription,
 	buildMode: BuildMode,
 	branch: GitBranch,
-	options?: { redact?: string[]; silent?: boolean }
+	options?: { redact?: string[]; silent?: boolean; sanitizeEnv?: boolean }
 ): void {
 	const toRedact = options?.redact ?? [];
 	const sanitized = toRedact.reduce(
@@ -373,7 +444,16 @@ function executeCommand(
 	}
 
 	try {
-		execSync(command, { stdio: 'inherit' });
+		const execOptions: { stdio: 'inherit'; env?: NodeJS.ProcessEnv } = {
+			stdio: 'inherit',
+		};
+
+		// Sanitize environment when executing untrusted code from fetched repository
+		if (options?.sanitizeEnv) {
+			execOptions.env = sanitizeEnvironment();
+		}
+
+		execSync(command, execOptions);
 		log(`✅ ${description} completed successfully`);
 	} catch {
 		error(`❌ Failed during: ${description}`);
@@ -531,6 +611,10 @@ function installDocumentationTemplate(
  * called after dependencies are installed since fumadocs-mdx needs to be available
  * in node_modules.
  *
+ * **Security Note**: This function executes package scripts from the fetched
+ * documentation repository with a sanitized environment to prevent exposure of
+ * CI secrets to untrusted code.
+ *
  * @param buildMode - Current build mode for error context
  * @param branch - Current branch for error context
  *
@@ -552,13 +636,15 @@ function processMDXContent(buildMode: BuildMode, branch: GitBranch): void {
 		`cd ${FETCH_CONFIG.DOCS_APP_DIR} && pnpm copy-content`,
 		'Copying MDX content with copy-content',
 		buildMode,
-		branch
+		branch,
+		{ sanitizeEnv: true }
 	);
 	executeCommand(
 		`cd ${FETCH_CONFIG.DOCS_APP_DIR} && pnpm fumadocs-mdx`,
 		'Processing MDX content with fumadocs-mdx',
 		buildMode,
-		branch
+		branch,
+		{ sanitizeEnv: true }
 	);
 }
 
@@ -569,6 +655,10 @@ function processMDXContent(buildMode: BuildMode, branch: GitBranch): void {
  * isolation from the main workspace. The --ignore-workspace flag prevents
  * pnpm from treating .docs as part of the workspace monorepo, while
  * --frozen-lockfile ensures reproducible dependency installation.
+ *
+ * **Security Note**: This function executes package installation from the fetched
+ * documentation repository with a sanitized environment to prevent exposure of
+ * CI secrets to install scripts and dependencies.
  *
  * @param buildMode - Current build mode for error context
  * @param branch - Current branch for error context
@@ -594,7 +684,8 @@ function installDocsAppDependencies(
 		`cd ${FETCH_CONFIG.DOCS_APP_DIR} && pnpm install --ignore-workspace --frozen-lockfile`,
 		'Installing .docs dependencies in isolation',
 		buildMode,
-		branch
+		branch,
+		{ sanitizeEnv: true }
 	);
 }
 
