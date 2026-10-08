@@ -41,7 +41,7 @@ jobs:
         run: pnpm fmt
 
       - name: 📦 Format package.json
-        run: npx --yes sort-package-json "package.json" "packages/*/package.json"
+        run: pnpm exec sort-package-json "package.json" "packages/*/package.json"
 
       - name: 📚 Format Docs 
         run: pnpm fmt:docs
