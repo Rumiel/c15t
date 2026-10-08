@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/server';
 import type { z } from 'zod';
 import { os } from '~/contracts';
+import { validateSubjectAuthorization } from '~/middleware/auth';
 import type { Consent as DBConsent } from '~/schema/consent';
 import type { PolicyTypeSchema } from '~/schema/consent-policy';
 import type { C15TContext } from '~/types';
@@ -94,6 +95,12 @@ export const verifyConsent = os.consent.verify.handler(
 		});
 
 		try {
+			// Validate subject authorization before processing
+			validateSubjectAuthorization(
+				{ subjectId, externalSubjectId },
+				typedContext
+			);
+
 			// Find subject
 			const subject = await typedContext.registry.findOrCreateSubject({
 				subjectId,
