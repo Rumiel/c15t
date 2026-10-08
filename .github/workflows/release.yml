@@ -41,12 +41,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile # Use frozen lockfile for reliability in CI
 
+      # Build all packages before publishing to isolate credentials from build scripts.
+      # This prevents repository-controlled build and prebuild scripts from accessing
+      # GITHUB_TOKEN and NPM_TOKEN, which are only needed for the publish step.
+      - name: Build packages
+        run: pnpm build
+
       - name: Create Release Pull Request or Publish to npm
         id: changesets # Give the step an ID to potentially reference outputs
         uses: changesets/action@v1
         with:
-          # The command to run for publishing. It matches your root package.json script.
-          publish: pnpm run release
+          # Only run the publish command, not the full release script.
+          # The build step has already completed above without credentials in scope.
+          publish: changeset publish
           # Optional: If you want the action to commit the version changes
           # commit: "chore: update versions"
           # Optional: If you want the action to create tags
@@ -54,7 +61,7 @@ jobs:
         env:
           # GITHUB_TOKEN is used by the action to create PRs, releases, comments
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NPM_TOKEN is used by 'changeset publish' (called via 'pnpm run release')
+          # NPM_TOKEN is used by 'changeset publish'
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # MUST be set in repo secrets
 
       # Optional: Output the results for debugging or confirmation
